@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XCanvas RAG Architecture</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f7f9;
+        }
+        .mermaid-container {
+            background-color: #ffffff;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 2rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="mermaid-container">
+        <h1>XCanvas RAG-Enhanced Architecture</h1>
+        <!-- This div will contain the rendered diagram -->
+        <div class="mermaid">
+            graph TD
+                subgraph "User Interaction"
+                    A[Manager] --> B{XCanvas Frontend UI};
+                end
+            
+                subgraph "Phase 1: Indexing Pipeline (One-time per document)"
+                    B -- "1. Uploads 'Deep Context' Document" --> C[Azure Function: UploadAndIndex];
+                    C -- "2. Chunks Document & Creates Embeddings" --> D{"Azure OpenAI Service\n(Embeddings Model)"};
+                    D -- "3. Stores Vectors & Chunks" --> E[("Azure AI Search\nVector Database")];
+                end
+            
+                subgraph "Phase 2: RAG-Enhanced Generation Pipeline"
+                    B -- "4. Requests Training with 'Topic'" --> F[Azure Function: GenerateTrainingModule];
+                    F -- "5. Creates Embedding for 'Topic'" --> D;
+                    D -- "6. Searches for Relevant Chunks" --> E;
+                    E -- "7. Retrieves Top 3-5 Chunks" --> F;
+                    F -- "8. Injects Retrieved Chunks into Prompt" --> G{"Azure OpenAI Service\n(GPT-4o Model)"};
+                    G -- "9. Generates Context-Aware Module" --> F;
+                    F -- "10. Returns Module to UI" --> B;
+                end
+            
+                style A fill:#cde4ff,stroke:#6a8ebf,stroke-width:2px
+                style B fill:#cde4ff,stroke:#6a8ebf,stroke-width:2px
+                style E fill:#fff0c1,stroke:#d6b656,stroke-width:2px
+                style D fill:#d5e8d4,stroke:#82b366,stroke-width:2px
+                style G fill:#d5e8d4,stroke:#82b366,stroke-width:2px
+        </div>
+    </div>
+
+    <!-- This script loads the Mermaid library and tells it to render the diagram -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({ startOnLoad: true });
+    </script>
+</body>
+</html>

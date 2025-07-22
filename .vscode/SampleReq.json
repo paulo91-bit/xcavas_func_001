@@ -1,0 +1,22 @@
+{
+    "example 1": {
+        "prompt": "Time Management for Remote Teams",
+        "industry": "Software Development",
+        "audience": "Project Managers"
+    },
+    "example 2": {
+        "prompt": "Designing and Implementing a CI/CD Pipeline for Microservices",
+        "industry": "E-commerce",
+        "audience": "Senior DevOps Engineers",
+        "learningObjectives": [
+            "Differentiate between Continuous Integration, Continuous Delivery, and Continuous Deployment.",
+            "Design a pipeline that includes automated testing, security scanning, and artifact storage.",
+            "Implement a blue-green deployment strategy to minimize downtime.",
+            "Integrate automated rollback procedures based on health checks."
+        ],
+        "contentType": "Technical Deep-Dive",
+        "tone": "Formal and Technical",
+        "priorKnowledge": "Familiarity with Docker, Kubernetes, and at least one major cloud provider (AWS, Azure, or GCP)."
+    }
+}
+
