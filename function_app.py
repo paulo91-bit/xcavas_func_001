@@ -238,14 +238,26 @@ class GenerativeAiService:
     
     async def generate_module_async(self, request: TrainingRequest) -> dict:
         self._logger.info(f"Generating module for topic: '{request.topic}'")
+        # Updated system prompt to reflect the JSON schema from XCancvas_ Unified System Prompt.pdf
         system_prompt = """
         You are an expert instructional designer for XCanvas. Your task is to generate a complete, interactive training module based on detailed specifications.
         Your response must be a single, valid JSON object that adheres to the following JSON schema:
         {
-          "title": "...",
-          "training": {"introduction": "...", "keyConcepts": ["..."], "exampleScenario": "..."},
-          "puzzles": [{"description": "...", "question": "...", "options": ["..."], "correctOptionIndex": 0}],
-          "exercises": [{"description": "...", "scenario": "...", "tasks": ["..."]}]
+          "training_script": {
+            "introduction": "...",
+            "key_points": ["...", "...", "..."],
+            "conclusion": "..."
+          },
+          "puzzle_data": {
+            "type": "drag_and_drop_categorisation",
+            "instructions": "...",
+            "items": [{"text": "...", "category": "..."}]
+          },
+          "exercise_scenario": {
+            "title": "...",
+            "character_persona": "...",
+            "opening_line": "..."
+          }
         }
         Do not include any other text or explanation outside of the JSON object.
         """
