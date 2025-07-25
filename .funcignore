@@ -8,3 +8,27 @@ test
 .venv
 SampleReq.json
 SampleRes.json
+
+# Python virtual environment
+venv_xcanvas/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Local settings and secrets - DO NOT DEPLOY
+local.settings.json
+.env
+
+# Test files and evaluation scripts
+tests/
+evaluate_rag.py
+test.py
+
+# Sample request/response files
+SampleReq.json
+SampleRes.json
+
+# Local documentation and diagrams
+Read.md
+diagram.html

@@ -25,12 +25,12 @@ def _safely_decode_text(file_bytes: bytes, filename: str, content_type: str) -> 
     Raises ValueError if decoding fails or file type is unsupported.
     """
     text = ""
-    
+
     if filename.endswith('.pdf') or content_type == "application/pdf":
         logger.info("PDF file detected. Extracting text...")
         with fitz.open(stream=file_bytes, filetype="pdf") as doc:
             text = "\n".join([page.get_text() for page in doc])
-    
+
     elif filename.endswith('.docx') or content_type in [
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/octet-stream"  # fallback for Word uploads
@@ -48,151 +48,11 @@ def _safely_decode_text(file_bytes: bytes, filename: str, content_type: str) -> 
     else:
         logger.warning("Unsupported file type.")
         raise ValueError("Unsupported file type. Please upload a .pdf, .docx, or UTF-8 .txt file.")
-        
+
     return text
 
-# --- HTTP Trigger 1: Module Generation ---
-@app.route(route="GenerateTrainingModule", methods=['post'])
-async def GenerateTrainingModule(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Main function entry point for generating a complete training module.
-    """
-    logger.info('Python GenerateTrainingModule trigger function processed a request.')
-    try:
-        # --- Get Configuration & Parse Request ---
-        azure_openai_endpoint = os.environ["AZURE_OPENAI_ENDPOINT"]
-        azure_openai_key = os.environ["AZURE_OPENAI_KEY"]
-        azure_openai_deployment = os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"]
-        azure_api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
-        form_data = req.form
-        req_body = {key: form_data.get(key) for key in form_data}
-        
-        deep_context_content = ""
-
-        # --- Handle deepContextFile upload safely ---
-        if 'deepContextFile' in req.files:
-            file = req.files['deepContextFile']
-            filename = file.filename.lower()
-            file_bytes = file.read()
-            content_type = file.content_type
-
-            logger.info(f"Received file: {filename} ({content_type})")
-
-            try:
-                deep_context_content = _safely_decode_text(file_bytes, filename, content_type)
-            except ValueError as ve:
-                return func.HttpResponse(str(ve), status_code=400)
-            except Exception as e:
-                logger.exception("File processing failed.")
-                return func.HttpResponse(f"Could not process uploaded file: {e}", status_code=400)
-        else:
-            # If no file is uploaded, use the deepContext from the form field directly
-            deep_context_content = form_data.get('deepContext', '')
-            logger.info("No file uploaded. Using 'deepContext' form field.")
-            
-            # Additional sanitization for form field deepContext to ensure valid UTF-8
-            if deep_context_content:
-                try:
-                    # Encode to UTF-8 and decode back, replacing any invalid sequences.
-                    # This ensures the string is truly valid Unicode for JSON and API.
-                    deep_context_content = deep_context_content.encode('utf-8', errors='replace').decode('utf-8')
-                    logger.info("deepContext from form field successfully sanitized to UTF-8.")
-                except Exception as sanitize_e:
-                    logger.exception(f"Failed to sanitize deepContext from form field: {sanitize_e}")
-                    return func.HttpResponse("Provided deepContext text in form field could not be processed due to encoding issues.", status_code=400)
-
-        req_body['deepContext'] = deep_context_content
-        logger.debug(f"Extracted deepContext (preview): {deep_context_content[:300]}")
-        
-        # --- Validate & Generate ---
-        training_request = TrainingRequest(req_body)
-        validation_error = training_request.validate()
-        if validation_error: return func.HttpResponse(validation_error, status_code=400)
-        
-        # Pass the correct logger instance
-        ai_service = GenerativeAiService(api_key=azure_openai_key, azure_endpoint=azure_openai_endpoint, api_version=azure_api_version, azure_deployment=azure_openai_deployment, logger=logger)
-        training_module = await ai_service.generate_module_async(training_request)
-        
-        # --- Final Response ---
-        training_module['requestDetails'] = training_request.to_dict()
-        return func.HttpResponse(json.dumps(training_module), mimetype="application/json", status_code=200)
-
-    except KeyError as e:
-        logger.exception("Missing environment variable.") # Added logging for KeyError
-        return func.HttpResponse(f"Server configuration error: Missing setting for {e}.", status_code=500)
-    except Exception as e:
-        logger.exception("An internal server error occurred.") # Added logging for generic Exception
-        return func.HttpResponse(f"An internal server error occurred: {e}", status_code=500)
-
-# --- HTTP Trigger 2: Contextual Q&A Chat (Text-based) ---
-@app.route(route="Chat", methods=['post'])
-async def ChatHandler(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Handles a context-question-answer request.
-    """
-    logger.info('Python Chat trigger function processed a request.') # Changed logging to use 'logger'
-    try:
-        # --- Get Configuration & Parse Request ---
-        azure_openai_endpoint = os.environ["AZURE_OPENAI_ENDPOINT"]
-        azure_openai_key = os.environ["AZURE_OPENAI_KEY"]
-        azure_openai_deployment = os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"]
-        azure_api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
-        req_body = req.get_json()
-        chat_request = ChatRequest(req_body)
-        validation_error = chat_request.validate()
-        if validation_error: return func.HttpResponse(validation_error, status_code=400)
-        
-        # --- Get AI Response ---
-        # Pass the correct logger instance
-        ai_service = GenerativeAiService(api_key=azure_openai_key, azure_endpoint=azure_openai_endpoint, api_version=azure_api_version, azure_deployment=azure_openai_deployment, logger=logger)
-        response_json = await ai_service.contextual_chat_async(chat_request)
-        
-        # --- Final Response ---
-        return func.HttpResponse(json.dumps(response_json), mimetype="application/json", status_code=200)
-
-    except KeyError as e:
-        logger.exception("Missing environment variable.") # Added logging for KeyError
-        return func.HttpResponse(f"Server configuration error: Missing setting for {e}.", status_code=500)
-    except Exception as e:
-        logger.exception("An internal server error occurred.") # Added logging for generic Exception
-        return func.HttpResponse(f"An internal server error occurred: {e}", status_code=500)
-
-# --- HTTP Trigger 3: Structured Role-Play (Text-based) ---
-@app.route(route="StructuredRolePlay", methods=['post'])
-async def StructuredRolePlayHandler(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Handles a structured, text-based role-play simulation turn.
-    Accepts and returns a complex JSON object with messages and objectives.
-    """
-    logger.info('Python StructuredRolePlay trigger function processed a request.') # Changed logging to use 'logger'
-    try:
-        # --- Get Configuration & Parse Request ---
-        azure_openai_endpoint = os.environ["AZURE_OPENAI_ENDPOINT"]
-        azure_openai_key = os.environ["AZURE_OPENAI_KEY"]
-        azure_openai_deployment = os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"]
-        azure_api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
-        req_body = req.get_json()
-        roleplay_request = StructuredRolePlayRequest(req_body)
-        validation_error = roleplay_request.validate()
-        if validation_error: return func.HttpResponse(validation_error, status_code=400)
-        
-        # --- Get AI Response ---
-        # Pass the correct logger instance
-        ai_service = GenerativeAiService(api_key=azure_openai_key, azure_endpoint=azure_openai_endpoint, api_version=azure_api_version, azure_deployment=azure_openai_deployment, logger=logger)
-        response_json = await ai_service.structured_roleplay_async(roleplay_request)
-        
-        # --- Final Response ---
-        return func.HttpResponse(json.dumps(response_json), mimetype="application/json", status_code=200)
-
-    except KeyError as e:
-        logger.exception("Missing environment variable.") # Added logging for KeyError
-        return func.HttpResponse(f"Server configuration error: Missing setting for {e}.", status_code=500)
-    except Exception as e:
-        logger.exception("An internal server error occurred.") # Added logging for generic Exception
-        return func.HttpResponse(f"An internal server error occurred: {e}", status_code=500)
-
-
 # --- Data Models ---
+# MOVE THESE CLASS DEFINITIONS UP HERE, BEFORE THEY ARE USED
 class TrainingRequest:
     def __init__(self, data: dict):
         self.topic = data.get('topic')
@@ -229,45 +89,92 @@ class StructuredRolePlayRequest:
         if not self.objectives: return "Request must include an 'objectives' array."
         return None
 
+
 # --- Services ---
+# This class also uses TrainingRequest, ChatRequest, StructuredRolePlayRequest
 class GenerativeAiService:
     def __init__(self, api_key: str, azure_endpoint: str, api_version: str, azure_deployment: str, logger: logging.Logger):
         self.azure_deployment = azure_deployment
         self.client = openai.AsyncAzureOpenAI(api_key=api_key, api_version=api_version, azure_endpoint=azure_endpoint)
         self._logger = logger
-    
-    async def generate_module_async(self, request: TrainingRequest) -> dict:
+
+    async def generate_module_async(self, request: TrainingRequest) -> dict: # TrainingRequest used here
         self._logger.info(f"Generating module for topic: '{request.topic}'")
         # Updated system prompt to reflect the JSON schema from XCancvas_ Unified System Prompt.pdf
         system_prompt = """
-        You are an expert instructional designer for XCanvas. Your task is to generate a complete, interactive training module based on detailed specifications.
-        Your response must be a single, valid JSON object that adheres to the following JSON schema:
+        You are an expert instructional designer for XCanvas. Your task is to generate a complete, interactive training module based on detailed specifications provided by the user.
+        Your response must be a single, valid JSON object that strictly adheres to the following schema:
         {
-          "training_script": {
-            "introduction": "...",
-            "key_points": ["...", "...", "..."],
-            "conclusion": "..."
-          },
-          "puzzle_data": {
-            "type": "drag_and_drop_categorisation",
-            "instructions": "...",
-            "items": [{"text": "...", "category": "..."}]
-          },
-          "exercise_scenario": {
-            "title": "...",
-            "character_persona": "...",
-            "opening_line": "..."
-          }
+            "title": "string",
+            "training": {
+                "introduction": "string",
+                "keyConcepts": ["string", "string", "..."],
+                "exampleScenario": "string"
+            },
+            "puzzles": [
+                {
+                    "description": "string",
+                    "question": "string",
+                    "type": "drag_and_drop_categorisation",
+                    "instructions": "string",
+                    "items": [
+                        {"text": "string", "category": "string"},
+                        {"text": "string", "category": "string"}
+                    ]
+                }
+            ],
+            "exercises": [
+                {
+                    "description": "string",
+                    "scenario": "string",
+                    "tasks": ["string", "string", "..."]
+                }
+            ],
+            "requestDetails": {
+                "topic": "string",
+                "subTopic": "string",
+                "industry": "string",
+                "audience": "string",
+                "desiredLength": "string",
+                "deepContext": "string"
+            }
         }
-        Do not include any other text or explanation outside of the JSON object.
+
+        Ensure all required fields are present and their values are appropriate strings or arrays as indicated by the schema.
+        Populate the "requestDetails" object with the exact values from the user's input request.
+        Do not include any other text, explanations, or commentary outside of the JSON object.
         """
-        user_prompt_parts = [f"Generate a training module with these specs:", f"- Topic: \"{request.topic}\""]
-        if request.deepContext: user_prompt_parts.extend(["\n--- DEEP CONTEXT ---", f"Context: \"{request.deepContext}\""])
+        user_prompt_parts = [
+            f"Generate a training module with these specs:",
+            f"- Topic: \"{request.topic}\"",
+            f"- SubTopic: \"{request.subTopic}\"",
+            f"- Industry: \"{request.industry}\"",
+            f"- Audience: \"{request.audience}\"",
+            f"- Desired Length: \"{request.desiredLength}\""
+        ]
+        if request.deepContext:
+            user_prompt_parts.extend([
+                "\n--- DEEP CONTEXT ---",
+                f"Context: \"{request.deepContext}\""
+            ])
+
+        # Add a specific instruction to populate requestDetails from the user prompt
+        user_prompt_parts.append("\n\nEnsure the 'requestDetails' object in the output JSON matches these input specifications exactly.")
+
         user_prompt = "\n".join(user_prompt_parts)
-        response = await self.client.chat.completions.create(model=self.azure_deployment, messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}], response_format={"type": "json_object"})
+
+        response = await self.client.chat.completions.create(
+            model=self.azure_deployment,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+
         return json.loads(response.choices[0].message.content)
 
-    async def contextual_chat_async(self, request: ChatRequest) -> dict:
+    async def contextual_chat_async(self, request: ChatRequest) -> dict: # ChatRequest used here
         """Handles a contextual question and answer request."""
         self._logger.info("Handling contextual chat request...")
         system_prompt = """
@@ -278,7 +185,7 @@ class GenerativeAiService:
         Example: {"answer": "This is the answer."}
         Do not include any other text or explanation.
         """
-        
+
         user_prompt = json.dumps({
             "context": request.context,
             "question": request.question
@@ -292,9 +199,9 @@ class GenerativeAiService:
             ],
             response_format={"type": "json_object"}
         )
-        
+
         ai_response = json.loads(response.choices[0].message.content)
-        
+
         # Construct the final response object
         final_response = {
             "context": request.context,
@@ -303,7 +210,7 @@ class GenerativeAiService:
         }
         return final_response
 
-    async def structured_roleplay_async(self, request: StructuredRolePlayRequest) -> dict:
+    async def structured_roleplay_async(self, request: StructuredRolePlayRequest) -> dict: # StructuredRolePlayRequest used here
         """Handles a structured role-play turn."""
         self._logger.info("Handling structured role-play turn.")
         system_prompt = """
@@ -315,7 +222,7 @@ class GenerativeAiService:
         The new message's role must be "ai" or "system".
         Only output a valid JSON object. Do not add any explanation or commentary — JSON only.
         """
-        
+
         user_prompt = json.dumps(request.__dict__)
 
         response = await self.client.chat.completions.create(
@@ -326,10 +233,153 @@ class GenerativeAiService:
             ],
             response_format={"type": "json_object"}
         )
-        
+
         updated_simulation_state = json.loads(response.choices[0].message.content)
 
         if 'messages' in updated_simulation_state and updated_simulation_state['messages']:
             updated_simulation_state['newMessage'] = updated_simulation_state['messages'][-1]
 
         return updated_simulation_state
+
+# --- HTTP Trigger 1: Module Generation ---
+@app.route(route="GenerateTrainingModule", methods=['post'])
+async def GenerateTrainingModule(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Main function entry point for generating a complete training module.
+    """
+    logger.info('Python GenerateTrainingModule trigger function processed a request.')
+    try:
+        # --- Get Configuration & Parse Request ---
+        azure_openai_endpoint = os.environ["AZURE_OPENAI_ENDPOINT"]
+        azure_openai_key = os.environ["AZURE_OPENAI_KEY"]
+        azure_openai_deployment = os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"]
+        azure_api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
+        form_data = req.form
+        req_body = {key: form_data.get(key) for key in form_data}
+
+        deep_context_content = ""
+
+        # --- Handle deepContextFile upload safely ---
+        if 'deepContextFile' in req.files:
+            file = req.files['deepContextFile']
+            filename = file.filename.lower()
+            file_bytes = file.read()
+            content_type = file.content_type
+
+            logger.info(f"Received file: {filename} ({content_type})")
+
+            try:
+                deep_context_content = _safely_decode_text(file_bytes, filename, content_type)
+            except ValueError as ve:
+                return func.HttpResponse(str(ve), status_code=400)
+            except Exception as e:
+                logger.exception("File processing failed.")
+                return func.HttpResponse(f"Could not process uploaded file: {e}", status_code=400)
+        else:
+            # If no file is uploaded, use the deepContext from the form field directly
+            deep_context_content = form_data.get('deepContext', '')
+            logger.info("No file uploaded. Using 'deepContext' form field.")
+
+            # Additional sanitization for form field deepContext to ensure valid UTF-8
+            if deep_context_content:
+                try:
+                    # Encode to UTF-8 and decode back, replacing any invalid sequences.
+                    # This ensures the string is truly valid Unicode for JSON and API.
+                    deep_context_content = deep_context_content.encode('utf-8', errors='replace').decode('utf-8')
+                    logger.info("deepContext from form field successfully sanitized to UTF-8.")
+                except Exception as sanitize_e:
+                    logger.exception(f"Failed to sanitize deepContext from form field: {sanitize_e}")
+                    return func.HttpResponse("Provided deepContext text in form field could not be processed due to encoding issues.", status_code=400)
+
+        req_body['deepContext'] = deep_context_content
+        logger.debug(f"Extracted deepContext (preview): {deep_context_content[:300]}")
+
+        # --- Validate & Generate ---
+        training_request = TrainingRequest(req_body) # TrainingRequest used here
+        validation_error = training_request.validate()
+        if validation_error: return func.HttpResponse(validation_error, status_code=400)
+
+        # Pass the correct logger instance
+        ai_service = GenerativeAiService(api_key=azure_openai_key, azure_endpoint=azure_openai_endpoint, api_version=azure_api_version, azure_deployment=azure_openai_deployment, logger=logger)
+        training_module = await ai_service.generate_module_async(training_request)
+
+        # --- Final Response ---
+        # NOTE: Your desired output already has "requestDetails" at the top level.
+        # This line will add it again under a new "requestDetails" key if you
+        # want it duplicated, or you can remove this line if the AI should handle it.
+        # training_module['requestDetails'] = training_request.to_dict()
+        return func.HttpResponse(json.dumps(training_module), mimetype="application/json", status_code=200)
+
+    except KeyError as e:
+        logger.exception("Missing environment variable.") # Added logging for KeyError
+        return func.HttpResponse(f"Server configuration error: Missing setting for {e}.", status_code=500)
+    except Exception as e:
+        logger.exception("An internal server error occurred.") # Added logging for generic Exception
+        return func.HttpResponse(f"An internal server error occurred: {e}", status_code=500)
+
+# --- HTTP Trigger 2: Contextual Q&A Chat (Text-based) ---
+@app.route(route="Chat", methods=['post'])
+async def ChatHandler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Handles a context-question-answer request.
+    """
+    logger.info('Python Chat trigger function processed a request.') # Changed logging to use 'logger'
+    try:
+        # --- Get Configuration & Parse Request ---
+        azure_openai_endpoint = os.environ["AZURE_OPENAI_ENDPOINT"]
+        azure_openai_key = os.environ["AZURE_OPENAI_KEY"]
+        azure_openai_deployment = os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"]
+        azure_api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
+        req_body = req.get_json()
+        chat_request = ChatRequest(req_body) # ChatRequest used here
+        validation_error = chat_request.validate()
+        if validation_error: return func.HttpResponse(validation_error, status_code=400)
+
+        # --- Get AI Response ---
+        # Pass the correct logger instance
+        ai_service = GenerativeAiService(api_key=azure_openai_key, azure_endpoint=azure_openai_endpoint, api_version=azure_api_version, azure_deployment=azure_openai_deployment, logger=logger)
+        response_json = await ai_service.contextual_chat_async(chat_request)
+
+        # --- Final Response ---
+        return func.HttpResponse(json.dumps(response_json), mimetype="application/json", status_code=200)
+
+    except KeyError as e:
+        logger.exception("Missing environment variable.") # Added logging for KeyError
+        return func.HttpResponse(f"Server configuration error: Missing setting for {e}.", status_code=500)
+    except Exception as e:
+        logger.exception("An internal server error occurred.") # Added logging for generic Exception
+        return func.HttpResponse(f"An internal server error occurred: {e}", status_code=500)
+
+# --- HTTP Trigger 3: Structured Role-Play (Text-based) ---
+@app.route(route="StructuredRolePlay", methods=['post'])
+async def StructuredRolePlayHandler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Handles a structured, text-based role-play simulation turn.
+    Accepts and returns a complex JSON object with messages and objectives.
+    """
+    logger.info('Python StructuredRolePlay trigger function processed a request.') # Changed logging to use 'logger'
+    try:
+        # --- Get Configuration & Parse Request ---
+        azure_openai_endpoint = os.environ["AZURE_OPENAI_ENDPOINT"]
+        azure_openai_key = os.environ["AZURE_OPENAI_KEY"]
+        azure_openai_deployment = os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"]
+        azure_api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
+        req_body = req.get_json()
+        roleplay_request = StructuredRolePlayRequest(req_body) # StructuredRolePlayRequest used here
+        validation_error = roleplay_request.validate()
+        if validation_error: return func.HttpResponse(validation_error, status_code=400)
+
+        # --- Get AI Response ---
+        # Pass the correct logger instance
+        ai_service = GenerativeAiService(api_key=azure_openai_key, azure_endpoint=azure_openai_endpoint, api_version=azure_api_version, azure_deployment=azure_openai_deployment, logger=logger)
+        response_json = await ai_service.structured_roleplay_async(roleplay_request)
+
+        # --- Final Response ---
+        return func.HttpResponse(json.dumps(response_json), mimetype="application/json", status_code=200)
+
+    except KeyError as e:
+        logger.exception("Missing environment variable.") # Added logging for KeyError
+        return func.HttpResponse(f"Server configuration error: Missing setting for {e}.", status_code=500)
+    except Exception as e:
+        logger.exception("An internal server error occurred.") # Added logging for generic Exception
+        return func.HttpResponse(f"An internal server error occurred: {e}", status_code=500)
